@@ -1,0 +1,53 @@
+// Title: Privilege Escalation via Token Impersonation (T1134)
+// MITRE ATT&CK: T1134 - Access Token Manipulation
+// Severity: Critical
+// Description: Detects suspicious privilege escalation events — accounts suddenly
+//              gaining admin/SYSTEM privileges not consistent with their role baseline.
+// Author: Apurva Tiwari
+// References: https://attack.mitre.org/techniques/T1134/
+
+SecurityEvent
+| where TimeGenerated > ago(2h)
+| where EventID in (4672, 4673, 4674)
+// 4672: Special privileges assigned to new logon (admin-equivalent)
+// 4673: Privileged service called
+// 4674: Privileged object operation
+| where Account !endswith "$"
+| where Account !in ("SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE")
+// Filter for high-value privileges
+| where PrivilegeList has_any (
+    "SeDebugPrivilege",          // Allows debugging any process — used by Mimikatz
+    "SeImpersonatePrivilege",    // Token impersonation
+    "SeTcbPrivilege",            // Act as part of OS
+    "SeLoadDriverPrivilege",     // Load/unload device drivers
+    "SeRestorePrivilege",        // Bypass file/dir permissions
+    "SeTakeOwnershipPrivilege",  // Take ownership of objects
+    "SeBackupPrivilege"          // Bypass file read permissions
+)
+| extend DangerousPrivileges = pack_array(
+    iff(PrivilegeList has "SeDebugPrivilege", "SeDebugPrivilege", ""),
+    iff(PrivilegeList has "SeImpersonatePrivilege", "SeImpersonatePrivilege", ""),
+    iff(PrivilegeList has "SeTcbPrivilege", "SeTcbPrivilege", ""),
+    iff(PrivilegeList has "SeLoadDriverPrivilege", "SeLoadDriverPrivilege", ""),
+    iff(PrivilegeList has "SeTakeOwnershipPrivilege", "SeTakeOwnershipPrivilege", "")
+)
+| extend DangerousPrivileges = array_strcat(array_difference(DangerousPrivileges, dynamic([""])), ", ")
+| where isnotempty(DangerousPrivileges)
+| summarize
+    PrivilegeEvents = count(),
+    DistinctPrivileges = dcount(PrivilegeList),
+    PrivilegeSets = make_set(DangerousPrivileges, 3),
+    HostsAffected = dcount(Computer),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by Account, Computer
+| extend
+    Severity = case(
+        PrivilegeSets has "SeDebugPrivilege" or PrivilegeSets has "SeTcbPrivilege", "Critical",
+        PrivilegeSets has "SeImpersonatePrivilege", "High",
+        "High"
+    ),
+    MitreAttack = "T1134",
+    Recommendation = "Verify account authorization for these privileges; if unexpected, treat as compromise"
+| project-reorder Severity, Account, Computer, PrivilegeEvents, PrivilegeSets, HostsAffected, MitreAttack, Recommendation, FirstSeen, LastSeen
+| sort by Severity asc, PrivilegeEvents desc

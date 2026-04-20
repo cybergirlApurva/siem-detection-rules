@@ -1,0 +1,44 @@
+// Title: Suspicious Scheduled Task Creation (T1053.005)
+// MITRE ATT&CK: T1053.005 - Scheduled Task/Job: Scheduled Task
+// Severity: High
+// Description: Detects scheduled task creation with suspicious properties — tasks running
+//              from temp directories, executing encoded commands, or created by non-admin accounts.
+// Author: Apurva Tiwari
+// References: https://attack.mitre.org/techniques/T1053/005/
+
+SecurityEvent
+| where TimeGenerated > ago(2h)
+| where EventID == 4698   // Scheduled task was created
+| extend
+    TaskContent = tostring(EventData),
+    TaskName = extract(@"TaskName>\s*\\(.+?)\s*<\/TaskName", 1, tostring(EventData)),
+    TaskCommand = extract(@"Command>\s*(.+?)\s*<\/Command", 1, tostring(EventData)),
+    TaskArgs = extract(@"Arguments>\s*(.+?)\s*<\/Arguments", 1, tostring(EventData))
+| where
+    // Suspicious execution paths
+    TaskContent has_any (
+        "\\Temp\\", "\\AppData\\Local\\Temp\\", "\\Users\\Public\\",
+        "\\ProgramData\\", "%TEMP%", "%TMP%"
+    )
+    or
+    // Suspicious commands
+    TaskContent has_any (
+        "powershell", "cmd.exe", "wscript", "cscript", "mshta",
+        "regsvr32", "rundll32", "certutil", "bitsadmin"
+    )
+    or
+    // Encoded content in task
+    TaskContent has_any (
+        "-EncodedCommand", "-enc ", "FromBase64String",
+        "IEX", "Invoke-Expression"
+    )
+| extend
+    SuspicionReason = pack_array(
+        iff(TaskContent has_any ("\\Temp\\", "\\AppData\\Local\\Temp\\", "\\Users\\Public\\"), "Runs from temp/public path", ""),
+        iff(TaskContent has_any ("powershell", "wscript", "mshta", "regsvr32", "certutil"), "Uses LOLBin", ""),
+        iff(TaskContent has_any ("-EncodedCommand", "FromBase64String", "IEX"), "Contains encoded/obfuscated command", "")
+    ),
+    MitreAttack = "T1053.005"
+| extend SuspicionReason = array_strcat(array_difference(SuspicionReason, dynamic([""])), " | ")
+| project TimeGenerated, Account, Computer, TaskName, TaskCommand, TaskArgs, SuspicionReason, MitreAttack
+| sort by TimeGenerated desc

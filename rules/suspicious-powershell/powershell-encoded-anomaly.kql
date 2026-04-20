@@ -1,0 +1,41 @@
+// Title: PowerShell Encoded Command Anomaly (T1027 + T1059.001)
+// MITRE ATT&CK: T1027 - Obfuscated Files or Information, T1059.001 - PowerShell
+// Severity: High
+// Description: Identifies accounts executing encoded PowerShell commands that deviate
+//              from their historical baseline — high-signal, low-noise detection.
+// Author: Apurva Tiwari
+// References: https://attack.mitre.org/techniques/T1027/
+
+let LookbackWindow = 7d;   // Baseline period
+let DetectionWindow = 1h;  // Current detection window
+
+// Establish 7-day baseline
+let Baseline = SecurityEvent
+| where TimeGenerated between (ago(LookbackWindow) .. ago(1h))
+| where EventID in (4103, 4104)
+| where tostring(EventData) has_any ("-EncodedCommand", "-enc ", "FromBase64String")
+| summarize BaselineCount = count() by Account, Computer;
+
+// Current window activity
+SecurityEvent
+| where TimeGenerated > ago(DetectionWindow)
+| where EventID in (4103, 4104)
+| where tostring(EventData) has_any ("-EncodedCommand", "-enc ", "FromBase64String")
+| summarize
+    CurrentCount = count(),
+    CommandSamples = make_set(tostring(EventData), 2),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by Account, Computer
+| join kind=leftouter Baseline on Account, Computer
+| extend
+    BaselineCount = coalesce(BaselineCount, 0),
+    IsNewBehavior = BaselineCount == 0,
+    Multiplier = iff(BaselineCount > 0, round(todouble(CurrentCount) / todouble(BaselineCount), 1), 999.0)
+| where IsNewBehavior or Multiplier >= 3.0   // New or 3x baseline
+| extend
+    Severity = case(IsNewBehavior, "High", Multiplier >= 10, "Critical", "High"),
+    MitreAttack = "T1027, T1059.001",
+    Context = iff(IsNewBehavior, "First time encoded PS seen for this account", strcat(tostring(Multiplier), "x above 7-day baseline"))
+| project-reorder Severity, Account, Computer, CurrentCount, BaselineCount, Multiplier, Context, MitreAttack, CommandSamples, FirstSeen, LastSeen
+| sort by Multiplier desc

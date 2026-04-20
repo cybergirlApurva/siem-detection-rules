@@ -1,0 +1,58 @@
+// Title: Suspicious PowerShell Execution (T1059.001)
+// MITRE ATT&CK: T1059.001 - Command and Scripting Interpreter: PowerShell
+// Severity: High
+// Description: Detects PowerShell commands commonly used in attacks — encoded commands,
+//              download cradles, AMSI bypass, reflective loading, and credential harvesting.
+// Author: Apurva Tiwari
+// References: https://attack.mitre.org/techniques/T1059/001/
+
+SecurityEvent
+| where TimeGenerated > ago(1h)
+| where EventID in (4103, 4104)  // PowerShell module logging and script block logging
+| extend CommandLine = tostring(EventData)
+| where CommandLine has_any (
+    // Encoded / obfuscated execution
+    "-EncodedCommand", "-enc ", "-e ", "FromBase64String",
+    // Download cradles
+    "Invoke-WebRequest", "IEX(", "IEX (", "Invoke-Expression",
+    "DownloadString", "DownloadFile", "WebClient",
+    "Net.WebClient", "Start-BitsTransfer",
+    // AMSI bypass techniques
+    "AmsiUtils", "amsiInitFailed", "amsi.dll",
+    "System.Management.Automation.AmsiUtils",
+    // Credential harvesting
+    "Get-Credential", "ConvertTo-SecureString",
+    "sekurlsa", "logonpasswords",
+    // Reflective loading / in-memory execution
+    "Reflection.Assembly", "LoadWithPartialName",
+    "[System.Reflection", "PE injection",
+    // Persistence
+    "New-ScheduledTask", "schtasks", "Add-MpPreference -ExclusionPath",
+    // Recon
+    "Get-ADUser", "Get-ADGroupMember", "net user /domain"
+)
+| extend
+    SuspiciousIndicators = pack_array(
+        iff(CommandLine has_any ("-EncodedCommand", "-enc", "FromBase64String"), "Encoded/Obfuscated", ""),
+        iff(CommandLine has_any ("IEX", "Invoke-Expression", "DownloadString", "WebClient"), "Download Cradle", ""),
+        iff(CommandLine has_any ("AmsiUtils", "amsiInitFailed", "amsi.dll"), "AMSI Bypass", ""),
+        iff(CommandLine has_any ("sekurlsa", "logonpasswords", "Get-Credential"), "Credential Theft", ""),
+        iff(CommandLine has_any ("Reflection.Assembly", "PE injection"), "Reflective Load", "")
+    ),
+    MitreAttack = "T1059.001"
+| extend SuspiciousIndicators = array_strcat(array_difference(SuspiciousIndicators, dynamic([""])), ", ")
+| summarize
+    ExecutionCount = count(),
+    UniqueHosts = dcount(Computer),
+    CommandSamples = make_set(CommandLine, 3),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by Account, Computer, SuspiciousIndicators, MitreAttack
+| extend Severity = case(
+    SuspiciousIndicators has "AMSI Bypass", "Critical",
+    SuspiciousIndicators has "Credential Theft", "Critical",
+    SuspiciousIndicators has "Reflective Load", "High",
+    "High"
+)
+| project-reorder Severity, Account, Computer, SuspiciousIndicators, ExecutionCount, CommandSamples, MitreAttack, FirstSeen, LastSeen
+| sort by Severity asc, ExecutionCount desc

@@ -1,0 +1,54 @@
+// Title: Anomalous Outbound Data Transfer (T1048)
+// MITRE ATT&CK: T1048 - Exfiltration Over Alternative Protocol
+// Severity: High
+// Description: Detects anomalous outbound data transfers that significantly exceed
+//              a host's historical baseline — a key indicator of data exfiltration.
+// Author: Apurva Tiwari
+// References: https://attack.mitre.org/techniques/T1048/
+
+let BaselinePeriod = 7d;
+let DetectionWindow = 1h;
+let ExfilThresholdGB = 0.5;        // Flag transfers over 500MB in detection window
+let BaselineMultiplier = 5.0;      // Or 5x above 7-day hourly average
+
+// 7-day baseline: avg hourly outbound bytes per host
+let Baseline = CommonSecurityLog
+| where TimeGenerated between (ago(BaselinePeriod) .. ago(1h))
+| where CommunicationDirection == "Outbound"
+| where DestinationIP !startswith "10."
+    and DestinationIP !startswith "172.16."
+    and DestinationIP !startswith "192.168."
+| summarize HourlyBytes = sum(SentBytes) by SourceHostName, bin(TimeGenerated, 1h)
+| summarize AvgHourlyBytes = avg(HourlyBytes), MaxHourlyBytes = max(HourlyBytes) by SourceHostName;
+
+// Current window
+CommonSecurityLog
+| where TimeGenerated > ago(DetectionWindow)
+| where CommunicationDirection == "Outbound"
+| where DestinationIP !startswith "10."
+    and DestinationIP !startswith "172.16."
+    and DestinationIP !startswith "192.168."
+| summarize
+    CurrentBytes = sum(SentBytes),
+    UniqueDestinations = dcount(DestinationIP),
+    DestinationIPs = make_set(DestinationIP, 5),
+    DestinationPorts = make_set(DestinationPort, 5),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by SourceHostName, SourceUserName
+| join kind=leftouter Baseline on SourceHostName
+| extend
+    AvgHourlyBytes = coalesce(AvgHourlyBytes, 0.0),
+    Multiplier = iff(AvgHourlyBytes > 0, round(todouble(CurrentBytes) / AvgHourlyBytes, 1), 999.0),
+    CurrentGB = round(todouble(CurrentBytes) / 1073741824, 3)
+| where CurrentGB >= ExfilThresholdGB or Multiplier >= BaselineMultiplier
+| extend
+    Severity = case(
+        CurrentGB >= 2.0 or Multiplier >= 20, "Critical",
+        CurrentGB >= 1.0 or Multiplier >= 10, "High",
+        "Medium"
+    ),
+    MitreAttack = "T1048",
+    Context = strcat(tostring(CurrentGB), " GB sent | ", tostring(Multiplier), "x above baseline")
+| project-reorder Severity, SourceHostName, SourceUserName, CurrentGB, Multiplier, UniqueDestinations, DestinationIPs, DestinationPorts, Context, MitreAttack, FirstSeen, LastSeen
+| sort by CurrentGB desc

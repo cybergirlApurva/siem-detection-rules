@@ -1,0 +1,48 @@
+// Title: DNS Tunneling / Exfiltration Detection (T1048.003 + T1071.004)
+// MITRE ATT&CK: T1048.003 - Exfiltration Over Unencrypted Non-C2 Protocol
+//               T1071.004 - Application Layer Protocol: DNS
+// Severity: High
+// Description: Detects DNS-based data exfiltration by identifying hosts making
+//              unusually high volumes of DNS queries or queries with abnormally long
+//              subdomains (indicative of data encoded in DNS labels).
+// Author: Apurva Tiwari
+// References: https://attack.mitre.org/techniques/T1048/003/
+
+let DNSQueryThreshold = 500;      // Queries per hour per host
+let SubdomainLengthThreshold = 50; // Characters in subdomain
+
+DnsEvents
+| where TimeGenerated > ago(1h)
+| where SubType == "LookupQuery"
+| extend
+    QueryLength = strlen(Name),
+    SubdomainPart = tostring(split(Name, ".")[0]),
+    SubdomainLength = strlen(tostring(split(Name, ".")[0])),
+    TopLevelDomain = strcat(tostring(split(Name, ".")[-2]), ".", tostring(split(Name, ".")[-1]))
+// Detect long subdomain labels (encoded data)
+| summarize
+    TotalQueries = count(),
+    UniqueQueries = dcount(Name),
+    AvgSubdomainLength = avg(SubdomainLength),
+    MaxSubdomainLength = max(SubdomainLength),
+    LongSubdomainCount = countif(SubdomainLength >= SubdomainLengthThreshold),
+    UniqueDomains = dcount(TopLevelDomain),
+    SampleQueries = make_set(Name, 5),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by Computer, ClientIP
+| where TotalQueries >= DNSQueryThreshold or LongSubdomainCount >= 10
+| extend
+    TunnelingScore = case(
+        LongSubdomainCount >= 50 and TotalQueries >= DNSQueryThreshold, "Critical",
+        LongSubdomainCount >= 20, "High",
+        TotalQueries >= DNSQueryThreshold * 3, "High",
+        "Medium"
+    ),
+    MitreAttack = "T1048.003, T1071.004",
+    Reason = strcat(
+        iff(TotalQueries >= DNSQueryThreshold, strcat(tostring(TotalQueries), " DNS queries/hr | "), ""),
+        iff(LongSubdomainCount >= 10, strcat(tostring(LongSubdomainCount), " long subdomain queries"), "")
+    )
+| project-reorder TunnelingScore, Computer, ClientIP, TotalQueries, LongSubdomainCount, AvgSubdomainLength, MaxSubdomainLength, UniqueDomains, Reason, MitreAttack, SampleQueries, FirstSeen, LastSeen
+| sort by LongSubdomainCount desc, TotalQueries desc

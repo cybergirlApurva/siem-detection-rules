@@ -1,0 +1,35 @@
+// Title: LSASS Memory Access - Credential Dumping (T1003.001)
+// MITRE ATT&CK: T1003.001 - OS Credential Dumping: LSASS Memory
+// Severity: Critical
+// Description: Detects processes accessing LSASS memory, a common technique used by
+//              tools like Mimikatz, ProcDump, and Cobalt Strike to dump credentials.
+// Author: Apurva Tiwari
+// References: https://attack.mitre.org/techniques/T1003/001/
+
+SecurityEvent
+| where TimeGenerated > ago(1h)
+| where EventID == 4656  // Handle to object requested
+| where ObjectName has "lsass"
+| where ProcessName !in (
+    "C:\\Windows\\System32\\wininit.exe",
+    "C:\\Windows\\System32\\csrss.exe",
+    "C:\\Windows\\System32\\services.exe",
+    "C:\\Windows\\System32\\lsass.exe",
+    "C:\\Windows\\System32\\svchost.exe",
+    "C:\\Windows\\System32\\MsMpEng.exe"  // Windows Defender
+)
+| extend
+    ProcessNameShort = tostring(split(ProcessName, "\\")[-1]),
+    AccessMask = tostring(AccessMask)
+| summarize
+    AccessCount = count(),
+    DistinctAccessMasks = dcount(AccessMask),
+    AccessMasks = make_set(AccessMask, 5),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by Account, Computer, ProcessName, ProcessNameShort
+| extend Severity = "Critical"
+| extend MitreAttack = "T1003.001"
+| extend Recommendation = "Isolate host immediately, check for Mimikatz/ProcDump execution, review account for compromise"
+| project-reorder Severity, Computer, Account, ProcessNameShort, ProcessName, AccessCount, AccessMasks, MitreAttack, Recommendation, FirstSeen, LastSeen
+| sort by AccessCount desc

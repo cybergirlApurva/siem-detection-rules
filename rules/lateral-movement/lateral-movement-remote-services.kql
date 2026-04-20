@@ -1,0 +1,34 @@
+// Title: Lateral Movement via Remote Services (T1021)
+// MITRE ATT&CK: T1021 - Remote Services
+// Severity: High
+// Description: Detects suspicious remote service connections indicative of lateral movement.
+//              Flags non-standard accounts initiating SMB/RDP/WinRM connections to multiple hosts.
+// Author: Apurva Tiwari
+// References: https://attack.mitre.org/techniques/T1021/
+
+SecurityEvent
+| where TimeGenerated > ago(1h)
+| where EventID in (4624, 4625, 4648)
+| where LogonType in (3, 10)  // Network and RemoteInteractive
+| where AccountType == "User"
+| where Account !endswith "$"  // Exclude machine accounts
+| where IpAddress !in ("127.0.0.1", "::1", "-")
+| summarize
+    TargetHosts = dcount(Computer),
+    LogonAttempts = count(),
+    FailedLogons = countif(EventID == 4625),
+    SuccessLogons = countif(EventID == 4624),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated),
+    HostList = make_set(Computer, 10)
+    by Account, IpAddress, WorkstationName
+| where TargetHosts >= 3  // Lateral movement threshold
+| where FailedLogons > 0 or SuccessLogons > 2
+| extend RiskScore = case(
+    TargetHosts >= 10, "Critical",
+    TargetHosts >= 5,  "High",
+    TargetHosts >= 3,  "Medium",
+    "Low"
+)
+| project-reorder RiskScore, Account, IpAddress, TargetHosts, LogonAttempts, FailedLogons, SuccessLogons, HostList, FirstSeen, LastSeen
+| sort by TargetHosts desc

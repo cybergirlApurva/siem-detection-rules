@@ -1,0 +1,36 @@
+// Title: Pass-the-Hash Attack Detection (T1550.002)
+// MITRE ATT&CK: T1550.002 - Use Alternate Authentication Material: Pass the Hash
+// Severity: Critical
+// Description: Detects Pass-the-Hash attacks by identifying NTLM logons where the source
+//              workstation does not match the account's typical logon origin.
+// Author: Apurva Tiwari
+// References: https://attack.mitre.org/techniques/T1550/002/
+
+SecurityEvent
+| where TimeGenerated > ago(2h)
+| where EventID == 4624
+| where LogonType == 3           // Network logon
+| where AuthenticationPackageName == "NTLM"
+| where Account !endswith "$"    // Exclude machine accounts
+| where WorkstationName != ""
+| where IpAddress != "-"
+// Build baseline of typical logon source per account
+| summarize
+    NTLMLogons = count(),
+    UniqueSourceIPs = dcount(IpAddress),
+    UniqueWorkstations = dcount(WorkstationName),
+    SourceIPs = make_set(IpAddress, 5),
+    Workstations = make_set(WorkstationName, 5),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by Account, Computer
+| where NTLMLogons >= 3
+| where UniqueSourceIPs >= 2    // Same account authenticating from multiple IPs via NTLM
+| extend Severity = case(
+    UniqueSourceIPs >= 5, "Critical",
+    UniqueSourceIPs >= 3, "High",
+    "Medium"
+)
+| extend MitreAttack = "T1550.002"
+| project-reorder Severity, Account, Computer, NTLMLogons, UniqueSourceIPs, UniqueWorkstations, SourceIPs, Workstations, MitreAttack, FirstSeen, LastSeen
+| sort by UniqueSourceIPs desc

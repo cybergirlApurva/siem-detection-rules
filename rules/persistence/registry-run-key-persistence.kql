@@ -1,0 +1,47 @@
+// Title: Registry Run Key Persistence (T1547.001)
+// MITRE ATT&CK: T1547.001 - Boot or Logon Autostart Execution: Registry Run Keys
+// Severity: High
+// Description: Detects modifications to common registry Run keys used for persistence.
+//              Flags writes from non-standard processes or pointing to suspicious paths.
+// Author: Apurva Tiwari
+// References: https://attack.mitre.org/techniques/T1547/001/
+
+SecurityEvent
+| where TimeGenerated > ago(2h)
+| where EventID == 4657  // Registry value modified
+| where ObjectName has_any (
+    "\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+    "\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce",
+    "\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run",
+    "\\SYSTEM\\CurrentControlSet\\Services"
+)
+| extend
+    RegistryKey = tostring(ObjectName),
+    NewValue = tostring(NewValue),
+    ProcessName = tostring(ProcessName)
+| where
+    // Exclude expected system writers
+    ProcessName !in (
+        "C:\\Windows\\System32\\msiexec.exe",
+        "C:\\Windows\\System32\\reg.exe",
+        "C:\\Program Files\\Windows Defender\\MsMpEng.exe"
+    )
+| extend
+    SuspiciousPath = NewValue has_any (
+        "\\Temp\\", "\\AppData\\Roaming\\", "\\Users\\Public\\",
+        "\\ProgramData\\", "%TEMP%", "%APPDATA%"
+    ),
+    SuspiciousCommand = NewValue has_any (
+        "powershell", "wscript", "cscript", "mshta", "regsvr32",
+        "rundll32", "certutil", "-enc", "FromBase64String"
+    )
+| where SuspiciousPath or SuspiciousCommand
+| extend
+    Severity = "High",
+    MitreAttack = "T1547.001",
+    Reason = strcat(
+        iff(SuspiciousPath, "Suspicious file path | ", ""),
+        iff(SuspiciousCommand, "Suspicious command in value", "")
+    )
+| project TimeGenerated, Account, Computer, RegistryKey, NewValue, ProcessName, Reason, MitreAttack, Severity
+| sort by TimeGenerated desc
