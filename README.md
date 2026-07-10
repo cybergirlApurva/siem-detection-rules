@@ -1,6 +1,6 @@
 # siem-detection-rules
 
-Production-grade KQL detection rules for **Azure Sentinel / Microsoft Sentinel**, mapped to [MITRE ATT&CK](https://attack.mitre.org/) TTPs. Rules are written to minimize false positives through baseline comparison, allowlisting, and severity scoring — patterns applied at enterprise scale across 15,000–20,000 endpoint environments.
+Production-grade KQL detection rules for **Azure Sentinel / Microsoft Sentinel**, mapped to [MITRE ATT&CK](https://attack.mitre.org/) TTPs. Rules are written to minimize false positives through baseline comparison, allowlisting, and severity scoring — techniques that consistently outperform static threshold-based detection.
 
 ---
 
@@ -50,7 +50,7 @@ siem-detection-rules/
 
 ## Rule Design Principles
 
-**Baseline comparison** — Several rules (password spray, encoded PowerShell anomaly, outbound transfer) compute a historical baseline and alert on deviation rather than static thresholds. This approach was core to achieving a 70% false positive reduction in production environments.
+**Baseline comparison** — Several rules (password spray, encoded PowerShell anomaly, outbound transfer) compute a historical baseline and alert on deviation rather than static thresholds. This approach significantly reduces alert fatigue compared to static thresholds by only firing when behavior deviates from an established baseline.
 
 **Severity scoring** — Every rule outputs a computed severity field (`Critical / High / Medium`) based on quantitative thresholds, enabling automated triage routing in SOAR platforms.
 
@@ -93,7 +93,7 @@ Critical | WS-FINANCE1 | jsmith        | procdump.exe    | 3           | T1003.0
 
 ## Background
 
-These rules reflect detection patterns developed during 7 years of enterprise SOC operations — including MTTD/MTTR reduction initiatives and Azure Sentinel deployments at 15,000–20,000 endpoint scale. All rules are sanitized for public sharing; no client data or environment-specific identifiers are included.
+These rules reflect detection patterns developed through hands-on SOC experience and GWU cybersecurity coursework. Written to be functional in any Azure Sentinel / Microsoft Sentinel environment. All rules are sanitized for public sharing.
 
 ---
 
