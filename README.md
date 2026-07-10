@@ -1,6 +1,6 @@
 # siem-detection-rules
 
-Production-grade KQL detection rules for **Azure Sentinel / Microsoft Sentinel**, mapped to [MITRE ATT&CK](https://attack.mitre.org/) TTPs. Rules are written to minimize false positives through baseline comparison, allowlisting, and severity scoring — techniques that consistently outperform static threshold-based detection.
+KQL detection rules for **Azure Sentinel / Microsoft Sentinel**, mapped to [MITRE ATT&CK](https://attack.mitre.org/) TTPs. Rules are written to minimize false positives through baseline comparison, allowlisting, and severity scoring.
 
 ---
 
@@ -50,7 +50,7 @@ siem-detection-rules/
 
 ## Rule Design Principles
 
-**Baseline comparison** — Several rules (password spray, encoded PowerShell anomaly, outbound transfer) compute a historical baseline and alert on deviation rather than static thresholds. This approach significantly reduces alert fatigue compared to static thresholds by only firing when behavior deviates from an established baseline.
+**Baseline comparison** — Several rules (password spray, encoded PowerShell anomaly, outbound transfer) compute a historical baseline and alert on deviation rather than static thresholds. This significantly reduces alert fatigue compared to fixed-count rules.
 
 **Severity scoring** — Every rule outputs a computed severity field (`Critical / High / Medium`) based on quantitative thresholds, enabling automated triage routing in SOAR platforms.
 
@@ -84,16 +84,10 @@ Medium   | 198.51.100.17  | 12              | 64            | 00:07:12
 **LSASS memory access** — `rules/credential-theft/lsass-memory-access.kql`
 
 ```
-Severity | Computer    | Account       | ProcessNameShort | AccessCount | MitreAttack
----------|-------------|---------------|-----------------|-------------|------------
-Critical | WS-FINANCE1 | jsmith        | procdump.exe    | 3           | T1003.001
+Severity | Computer    | Account | ProcessNameShort | AccessCount | MitreAttack
+---------|-------------|---------|-----------------|-------------|------------
+Critical | WS-FINANCE1 | jsmith  | procdump.exe    | 3           | T1003.001
 ```
-
----
-
-## Background
-
-These rules reflect detection patterns developed through hands-on SOC experience and GWU cybersecurity coursework. Written to be functional in any Azure Sentinel / Microsoft Sentinel environment. All rules are sanitized for public sharing.
 
 ---
 
